@@ -5,6 +5,7 @@ from pycocotools.cocoeval import COCOeval
 
 from deeplite_torch_zoo.src.objectdetection.eval.evaluator import Evaluator
 from deeplite_torch_zoo.src.objectdetection.datasets.coco import CocoDetectionBoundingBox
+from deeplite_torch_zoo.src.objectdetection.datasets.coco_foot import CocoFootDetectionBoundingBox
 
 
 class COCOEvaluator(Evaluator):
@@ -50,7 +51,7 @@ class COCOEvaluator(Evaluator):
 
 
 class YoloCOCOEvaluator(COCOEvaluator):
-    def __init__(self, model, dataset, gt=None, visualize=False, net="yolo3", img_size=448):
+    def __init__(self, model, dataset, gt=None, visualize=False, net="yolo3", img_size=448, background=0):
         super().__init__(
             model=model,
             dataset=dataset,
@@ -59,6 +60,7 @@ class YoloCOCOEvaluator(COCOEvaluator):
             net=net,
             img_size=img_size
         )
+        self.background = background
 
     def process_image(self, img, img_ind, multi_test=False, flip_test=False, **kwargs):
 
@@ -80,7 +82,7 @@ class YoloCOCOEvaluator(COCOEvaluator):
                     xmax - xmin,
                     ymax - ymin,
                     score,
-                    self.dataset.add_coco_empty_category(class_ind),
+                    self.dataset.add_coco_empty_category(class_ind) - self.background,
                 ]
             )
         return results
@@ -141,3 +143,15 @@ def yolo_eval_coco(model, data_root, gt=None, device="cuda", net="yolo3", **kwar
     model.to(device)
     with torch.no_grad():
         return YoloCOCOEvaluator(model, dataset, gt=gt, net=net).evaluate()
+
+
+def yolo_eval_coco_foot(model, data_root, gt=None, device="cuda", net="yolo3", **kwargs):
+    mAP = 0
+    result = {}
+    val_annotate = os.path.join(data_root, "annotations/person_keypoints_val2017_foot_v2.json")
+    val_coco_root = os.path.join(data_root, "val2017")
+    dataset = CocoFootDetectionBoundingBox(val_coco_root, val_annotate, classes=["foot"], missing_ids=[])
+
+    model.to(device)
+    with torch.no_grad():
+        return YoloCOCOEvaluator(model, dataset, gt=gt, net=net, background=1).evaluate()

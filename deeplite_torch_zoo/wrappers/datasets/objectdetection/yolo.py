@@ -9,12 +9,14 @@ from deeplite_torch_zoo.src.objectdetection.datasets.lisa import LISA
 from deeplite_torch_zoo.src.objectdetection.datasets.wider_face import WiderFace
 from deeplite_torch_zoo.src.objectdetection.datasets.transforms import random_transform_fn
 from deeplite_torch_zoo.src.objectdetection.datasets.coco import CocoDetectionBoundingBox
+from deeplite_torch_zoo.src.objectdetection.datasets.coco_foot import CocoFootDetectionBoundingBox
 
 __all__ = [
     "get_coco_for_yolo",
     "get_lisa_for_yolo",
     "get_voc_for_yolo",
-    "get_wider_face_for_yolo"
+    "get_wider_face_for_yolo",
+    "get_coco_foot_for_yolo",
 ]
 
 
@@ -152,3 +154,31 @@ def get_wider_face_for_yolo(
 
 
     return {"train": train_loader, "val": test_loader, "test": test_loader}
+
+def get_coco_foot_for_yolo(
+    data_root, batch_size=32, num_workers=4, num_classes=80, img_size=448, fp16=False, distributed=False, device="cuda", **kwargs
+):
+
+
+    train_trans = random_transform_fn
+    train_annotate = os.path.join(data_root, "annotations/person_keypoints_train2017_foot_v2.json") #instances_train2017.json")
+    train_coco_root = os.path.join(data_root, "train2017")
+    train_dataset = CocoFootDetectionBoundingBox(
+        train_coco_root, train_annotate, num_classes=num_classes, transform=train_trans,
+        img_size=img_size, classes=["foot"], missing_ids=[]
+    )
+
+    val_annotate = os.path.join(data_root, "annotations/person_keypoints_val2017_foot_v2.json") #instances_val2017.json")
+    val_coco_root = os.path.join(data_root, "val2017")
+    test_dataset = CocoFootDetectionBoundingBox(
+        val_coco_root, val_annotate, num_classes=num_classes, img_size=img_size,
+        classes=["foot"], missing_ids=[]
+    )
+
+    train_loader = get_dataloader(train_dataset, batch_size=batch_size, num_workers=num_workers,
+        collate_fn=train_dataset.collate_img_label_fn, device=device)
+
+    test_loader = get_dataloader(test_dataset, batch_size=batch_size, num_workers=num_workers,
+        shuffle=False, collate_fn=test_dataset.collate_img_label_fn, device=device)
+
+    return {"train": train_loader, "val": test_loader}

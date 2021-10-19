@@ -28,7 +28,7 @@ class Trainer(object):
     def __init__(self, weight_path, resume, gpu_id):
         init_seeds(0)
 
-        assert opt.dataset_type in ["coco", "voc", "lisa", "lisa_full", "lisa_subset11", "wider_face"]
+        assert opt.dataset_type in ["coco", "coco_foot", "voc", "lisa", "lisa_full", "lisa_subset11", "wider_face"]
         assert opt.net in ["yolov3", "yolov5s", "yolov5m", "yolov5l", "yolov5x", "yolov4s", "yolov4m", "yolov4l", "yolov4x"]
 
         self.hyp_config = hyp_cfg_scratch
@@ -89,7 +89,7 @@ class Trainer(object):
             return yolo5_local(
                 pretrained=opt.pretrained,
                 num_classes=self.num_classes,
-                net="yolov5",
+                net=opt.net,
                 device=self.device,
             )
         elif "yolov4" in opt.net:
@@ -191,6 +191,8 @@ class Trainer(object):
                     test_set = opt.img_dir / "VOC2007"
                 elif opt.dataset_type == "coco":
                     gt = COCO(opt.img_dir / "annotations/instances_val2017.json")
+                elif opt.dataset_type == "coco_foot":
+                    gt = COCO(opt.img_dir / "annotations/person_keypoints_val2017_foot_v2.json")
 
                 Aps = eval_func(self.model, test_set, gt=gt, num_classes=self.num_classes, _set=opt.dataset_type, device=self.device, net=opt.net)
                 mAP = Aps["mAP"]
