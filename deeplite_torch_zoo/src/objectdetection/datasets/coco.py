@@ -44,7 +44,7 @@ class CocoDetectionBoundingBox(CocoDetection):
         ann_file_name,
         num_classes=80,
         transform=None,
-        category="all",
+        category=1,
         img_size=416,
         classes=[],
         missing_ids=[]

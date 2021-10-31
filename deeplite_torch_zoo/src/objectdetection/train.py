@@ -9,7 +9,7 @@ from tqdm import tqdm
 from pycocotools.coco import COCO
 
 import deeplite_torch_zoo.src.objectdetection.configs.hyp_config as hyp_cfg_scratch
-
+from deeplite_torch_zoo.src.objectdetection.eval.coco.custom_coco import CustomCOCO
 import deeplite_torch_zoo.src.objectdetection.yolov3.utils.gpu as gpu
 from deeplite_torch_zoo.wrappers.wrapper import get_data_splits_by_name
 from deeplite_torch_zoo.wrappers.models import yolo3, yolo4, yolo4_lisa, yolo5_local
@@ -89,7 +89,7 @@ class Trainer(object):
             return yolo5_local(
                 pretrained=opt.pretrained,
                 num_classes=self.num_classes,
-                net="yolov5",
+                net=opt.net,
                 device=self.device,
             )
         elif "yolov4" in opt.net:
@@ -190,7 +190,8 @@ class Trainer(object):
                 if opt.dataset_type == "voc":
                     test_set = opt.img_dir / "VOC2007"
                 elif opt.dataset_type == "coco":
-                    gt = COCO(opt.img_dir / "annotations/instances_val2017.json")
+                    #gt = COCO(opt.img_dir / "annotations/instances_val2017.json")
+                    gt = CustomCOCO(opt.img_dir / "annotations/instances_val2017.json")
 
                 Aps = eval_func(self.model, test_set, gt=gt, num_classes=self.num_classes, _set=opt.dataset_type, device=self.device, net=opt.net)
                 mAP = Aps["mAP"]
