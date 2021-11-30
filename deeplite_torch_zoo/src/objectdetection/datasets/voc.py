@@ -1,11 +1,6 @@
-# coding=utf-8
 import os
-import sys
-from pathlib import Path
-
-sys.path.append("..")
-sys.path.append("../utils")
 import random
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -13,16 +8,15 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 import deeplite_torch_zoo.src.objectdetection.configs.voc_config as cfg
-from deeplite_torch_zoo.src.objectdetection.yolov3.utils.data_augment import (
-    Mixup, RandomAffine, RandomCrop, RandomHorizontalFilp, Resize)
-
-# from . import data_augment as dataAug
-# from . import tools
+from deeplite_torch_zoo.src.objectdetection.datasets.data_augment import (
+    Mixup, RandomAffine, RandomCrop, RandomHorizontalFlip, Resize,
+    AugmentHSV, Albumentations)
 
 
 class VocDataset(Dataset):
-    def __init__(self, annotation_path, anno_file_type, num_classes=None, img_size=416):
-        self._img_size = img_size  # For Multi-training
+    def __init__(self, annotation_path, anno_file_type, num_classes=None,
+                    img_size=416, mosaic=False, version_6_augs=False):
+        self._img_size = img_size  # for multi-scale training
         self.classes = cfg.DATA["CLASSES"]
         if num_classes == 1:
             self.classes = cfg.DATA["CLASSES_1"]
@@ -32,6 +26,10 @@ class VocDataset(Dataset):
         self.all_classes = cfg.DATA["ALLCLASSES"]
         self.annotation_path = annotation_path
         self.num_classes = len(self.classes)
+
+        self.mosaic = mosaic
+        self.version_6_augs = version_6_augs
+
         if num_classes is not None:
             self.num_classes = num_classes
 
@@ -63,18 +61,22 @@ class VocDataset(Dataset):
         return:
             bboxes of shape nx6, where n is number of labels in the image and x1,y1,x2,y2, class_id and confidence.
         """
-        img_org, bboxes_org, img_id = self.__parse_annotation(self.__annotations[item])
-        img_org = img_org.transpose(2, 0, 1)  # HWC->CHW
 
-        item_mix = random.randint(0, len(self.__annotations) - 1)
-        img_mix, bboxes_mix, _ = self.__parse_annotation(self.__annotations[item_mix])
-        img_mix = img_mix.transpose(2, 0, 1)
+        if self.mosaic:
+            img, bboxes, img_id = self.load_mosaic(item)
+        else:
+            # MixUp
+            img_org, bboxes_org, img_id = self.__parse_annotation(self.__annotations[item])
+            img_org = img_org.transpose(2, 0, 1)  # HWC->CHW
 
-        img, bboxes = Mixup()(img_org, bboxes_org, img_mix, bboxes_mix)
-        del img_org, bboxes_org, img_mix, bboxes_mix
+            item_mix = random.randint(0, len(self.__annotations) - 1)
+            img_mix, bboxes_mix, _ = self.__parse_annotation(self.__annotations[item_mix])
+            img_mix = img_mix.transpose(2, 0, 1)
+
+            img, bboxes = Mixup()(img_org, bboxes_org, img_mix, bboxes_mix)
+            del img_org, bboxes_org, img_mix, bboxes_mix
 
         img = torch.from_numpy(img).float()
-
         bboxes = torch.from_numpy(bboxes).float()
 
         return img, bboxes, bboxes.shape[0], img_id
@@ -149,37 +151,74 @@ class VocDataset(Dataset):
         if len(bboxes) == 0:
             bboxes = np.array(np.zeros((0, 5)))
         else:
-            img, bboxes = RandomHorizontalFilp()(np.copy(img), np.copy(bboxes))
+            img, bboxes = RandomHorizontalFlip()(np.copy(img), np.copy(bboxes))
+            if self.version_6_augs:
+                img, bboxes = Albumentations()(np.copy(img), np.copy(bboxes))
+                img = AugmentHSV()(np.copy(img))
             img, bboxes = RandomCrop()(np.copy(img), np.copy(bboxes))
             img, bboxes = RandomAffine()(np.copy(img), np.copy(bboxes))
+
         img, bboxes = Resize((self._img_size, self._img_size), True)(
             np.copy(img), np.copy(bboxes)
         )
         return img, bboxes, str(Path(img_path).stem)
+
+    def load_mosaic(self, item, resize_to_original_size=False):
+        # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
+        bboxes4 = []
+        s = self._img_size
+        mosaic_border = [-s // 2, -s // 2]
+        yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in mosaic_border)  # mosaic center x, y
+        indices = [item] + random.choices(range(0, len(self.__annotations)), k=3)  # 3 additional image indices
+        random.shuffle(indices)
+
+        for i, index in enumerate(indices):
+            # Load image
+            img, bboxes, img_id = self.__parse_annotation(self.__annotations[index])
+            h, w = img.shape[:2]
+
+            # place img in img4
+            if i == 0:  # top left
+                img4 = np.full((s * 2, s * 2, img.shape[2]), 114.0, dtype=np.float32) #114, dtype=np.uint8)  # base image with 4 tiles
+                x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
+                x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
+            elif i == 1:  # top right
+                x1a, y1a, x2a, y2a = xc, max(yc - h, 0), min(xc + w, s * 2), yc
+                x1b, y1b, x2b, y2b = 0, h - (y2a - y1a), min(w, x2a - x1a), h
+            elif i == 2:  # bottom left
+                x1a, y1a, x2a, y2a = max(xc - w, 0), yc, xc, min(s * 2, yc + h)
+                x1b, y1b, x2b, y2b = w - (x2a - x1a), 0, w, min(y2a - y1a, h)
+            elif i == 3:  # bottom right
+                x1a, y1a, x2a, y2a = xc, yc, min(xc + w, s * 2), min(s * 2, yc + h)
+                x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
+
+            img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+            padw = x1a - x1b
+            padh = y1a - y1b
+
+            # Labels
+            if bboxes.size:
+                bboxes[:, 0] += padw
+                bboxes[:, 2] += padw
+                bboxes[:, 1] += padh
+                bboxes[:, 3] += padh
+
+            bboxes4.append(bboxes)
+
+        # Concat/clip labels
+        bboxes4 = np.concatenate(bboxes4, 0)
+        bboxes4 = np.clip(bboxes4, 0, img4.shape[0])
+
+        if resize_to_original_size:
+            img4, bboxes4 = Resize((s, s), True, False)(
+                np.copy(img4), np.copy(bboxes4)
+            )
+
+        img4 = img4.transpose(2, 0, 1)  # HWC->CHW
+        return img4, bboxes4, img_id
 
 
 if __name__ == "__main__":
 
     voc_dataset = VocDataset(anno_file_type="train", img_size=448)
     dataloader = DataLoader(voc_dataset, shuffle=True, batch_size=1, num_workers=0)
-
-#    for i, (img, label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes) in enumerate(dataloader):
-#        if i == 0:
-#            print(img.shape)
-#            print(label_sbbox.shape)
-#            print(label_mbbox.shape)
-#            print(label_lbbox.shape)
-#            print(sbboxes.shape)
-#            print(mbboxes.shape)
-#            print(lbboxes.shape)
-#
-#            if img.shape[0] == 1:
-#                labels = np.concatenate([label_sbbox.reshape(-1, 26), label_mbbox.reshape(-1, 26),
-#                                         label_lbbox.reshape(-1, 26)], axis=0)
-#                labels_mask = labels[..., 4] > 0
-#                labels = np.concatenate([labels[labels_mask][..., :4], np.argmax(labels[labels_mask][..., 6:],
-#                                                                                 axis=-1).reshape(-1, 1)], axis=-1)
-#
-#                print(labels.shape)
-#                plot_box(labels, img, id=1)
-#

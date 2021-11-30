@@ -21,7 +21,8 @@ __all__ = [
     "yolo4x_voc_20",
     "yolo4_lisa",
     "yolo4m_lisa_11",
-    "yolo4l_leaky_voc_20"
+    "yolo4l_leaky_voc_20",
+    "YOLOV4_MODELS",
 ]
 
 model_urls = {
@@ -45,6 +46,7 @@ yolov4_cfg = {
     "yolov5x": "deeplite_torch_zoo/src/objectdetection/configs/yolov5x.yaml",
 }
 
+YOLOV4_MODELS = list(yolov4_cfg.keys())
 
 
 def _yolo4(
@@ -65,7 +67,7 @@ def _yolo4(
     return model.to(device)
 
 def yolo4(
-    net="yolov4s", pretrained=False, progress=True, num_classes=80, device="cuda"
+    net="yolov4s", pretrained=False, progress=True, num_classes=80, device="cuda", **kwargs
 ):
     config_path = get_project_root() / yolov4_cfg[net]
     model = YoloV5(config_path, ch=3, nc=num_classes)
@@ -79,7 +81,7 @@ def yolo4(
 
 
 def yolo4_lisa(
-    net="yolov4s", pretrained=False, progress=True, num_classes=80, device="cuda"
+    net="yolov4s", pretrained=False, progress=True, num_classes=80, device="cuda", **kwargs
 ):
     config_path = get_project_root() / yolov4_cfg[net]
     model = YoloV5(config_path, ch=3, nc=num_classes)

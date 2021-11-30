@@ -505,7 +505,7 @@ class TestModels(unittest.TestCase):
         print(APs)
         self.assertEqual(abs(APs["mAP"] - 0.893) < 0.001, True)
 
-    @pytest.mark.skip(reason="Needs retraining (anchor_grid size mismatch)")
+    @pytest.mark.test_yolov5s_voc
     def test_yolov5s_voc(self):
         model = get_model_by_name(
             model_name="yolo5s",
@@ -517,7 +517,7 @@ class TestModels(unittest.TestCase):
             model, "/neutrino/datasets//VOCdevkit/VOC2007/", _set="voc"
         )
         print(APs)
-        self.assertEqual(abs(APs["mAP"] - 0.817) < 0.001, True)
+        self.assertEqual(abs(APs["mAP"] - 0.837) < 0.001, True)
 
     @pytest.mark.test_yolov5m_voc
     def test_yolov5m_voc(self):
@@ -588,6 +588,21 @@ class TestModels(unittest.TestCase):
         )
         print(APs)
         self.assertEqual(abs(APs["mAP"] - 0.905) < 0.001, True)
+
+    @pytest.mark.test_yolov5_6s_voc
+    def test_yolov5_6s_voc(self):
+        model = get_model_by_name(
+            model_name="yolo5_6s",
+            dataset_name="voc_20",
+            pretrained=True,
+            progress=False,
+        )
+        APs = yolo_eval_voc(
+            model, "/neutrino/datasetss/VOCdevkit/VOC2007/", _set="voc"
+        )
+        print(APs)
+        self.assertEqual(abs(APs["mAP"] - 0.821) < 0.001, True)
+
 
     @pytest.mark.skip(reason="Needs retraining (anchor_grid size mismatch)")
     def test_yolov5s_coco(self):

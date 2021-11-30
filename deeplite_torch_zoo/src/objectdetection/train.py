@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import random
 from pathlib import Path
 
@@ -12,24 +13,29 @@ import deeplite_torch_zoo.src.objectdetection.configs.hyp_config as hyp_cfg_scra
 from deeplite_torch_zoo.src.objectdetection.eval.coco.custom_coco import CustomCOCO
 import deeplite_torch_zoo.src.objectdetection.yolov3.utils.gpu as gpu
 from deeplite_torch_zoo.wrappers.wrapper import get_data_splits_by_name
-from deeplite_torch_zoo.wrappers.models import yolo3, yolo4, yolo4_lisa, yolo5_local
+from deeplite_torch_zoo.wrappers.models import yolo3, yolo4, yolo4_lisa, yolo5_local, yolo5_6
 from deeplite_torch_zoo.wrappers.eval import get_eval_func
 from deeplite_torch_zoo.src.objectdetection.yolov3.model.loss.yolo_loss import \
     YoloV3Loss
-from deeplite_torch_zoo.src.objectdetection.yolov3.utils.cosine_lr_scheduler import \
-    CosineDecayLR
-from deeplite_torch_zoo.src.objectdetection.yolov3.utils.tools import (
-    init_seeds, weights_init_normal)
 from deeplite_torch_zoo.src.objectdetection.yolov5.models.yolov5_loss import \
     YoloV5Loss
+from deeplite_torch_zoo.src.objectdetection.yolov3.utils.cosine_lr_scheduler import \
+    CosineDecayLR
+from deeplite_torch_zoo.src.objectdetection.yolov3.utils.tools import init_seeds
+
+from deeplite_torch_zoo.wrappers.models import YOLOV3_MODELS, YOLOV4_MODELS, YOLOV5_MODELS
+
+
+YOLO_MODEL_NAMES = YOLOV3_MODELS + YOLOV4_MODELS + YOLOV5_MODELS
 
 
 class Trainer(object):
     def __init__(self, weight_path, resume, gpu_id):
         init_seeds(0)
 
+        self.model_name = opt.net
         assert opt.dataset_type in ["coco", "voc", "lisa", "lisa_full", "lisa_subset11", "wider_face"]
-        assert opt.net in ["yolov3", "yolov5s", "yolov5m", "yolov5l", "yolov5x", "yolov4s", "yolov4m", "yolov4l", "yolov4x"]
+        assert self.model_name in YOLO_MODEL_NAMES
 
         self.hyp_config = hyp_cfg_scratch
 
@@ -43,7 +49,7 @@ class Trainer(object):
         dataset_splits = get_data_splits_by_name(
             data_root=opt.img_dir,
             dataset_name=opt.dataset_type,
-            model_name=opt.net,
+            model_name=self.model_name,
             batch_size=opt.batch_size,
             num_workers=opt.n_cpu,
             img_size=self.hyp_config.TRAIN["TRAIN_IMG_SIZE"]
@@ -53,7 +59,7 @@ class Trainer(object):
         self.train_dataset = self.train_dataloader.dataset
         self.val_dataloader = dataset_splits["val"]
         self.num_classes = self.train_dataset.num_classes
-        self.weight_path = weight_path / opt.net / "{}_{}_cls".format(opt.dataset_type, self.num_classes)
+        self.weight_path = weight_path / self.model_name / "{}_{}_cls".format(opt.dataset_type, self.num_classes)
         Path(self.weight_path).mkdir(parents=True, exist_ok=True)
 
         self.model = self._get_model()
@@ -78,41 +84,30 @@ class Trainer(object):
         )
 
     def _get_model(self):
-        if "yolov3" in opt.net:
-            return yolo3(
-                pretrained=opt.pretrained,
-                progress=True,
-                num_classes=self.num_classes,
-                device=self.device,
-            )
-        elif "yolov5" in opt.net:
-            return yolo5_local(
-                pretrained=opt.pretrained,
-                num_classes=self.num_classes,
-                net=opt.net,
-                device=self.device,
-            )
-        elif "yolov4" in opt.net:
-            if "lisa" in opt.dataset_type:
-                return yolo4_lisa(
-                    pretrained=opt.pretrained,
-                    num_classes=self.num_classes,
-                    net="yolov4",
-                    device=self.device,
-                )
-            return yolo4(
-                pretrained=opt.pretrained,
-                num_classes=self.num_classes,
-                net="yolov4",
-                device=self.device,
-            )
+        net_name_to_model_fn_map = {
+            "^yolov3$": yolo3,
+            "^yolov5[smlx]$": yolo5_local,
+            "^yolov5_6[nsmlx]$": yolo5_6,
+            "^yolov4[smlx]$": yolo4 if "lisa" not in opt.dataset_type else yolo4_lisa,
+        }
+        default_model_fn_args = {
+            "pretrained": opt.pretrained,
+            "num_classes": self.num_classes,
+            "device": self.device,
+            "progress": True,
+        }
+        for net_name, model_fn in net_name_to_model_fn_map.items():
+            if re.match(net_name, self.model_name):
+                return model_fn(self.model_name, **default_model_fn_args)
 
     def _get_loss(self):
-        return YoloV3Loss(num_classes=self.num_classes, device=self.device)
+        if "yolov5_6" not in self.model_name:
+            return YoloV3Loss(num_classes=self.num_classes, device=self.device)
+        else:
+            return YoloV5Loss(model=self.model, num_classes=self.num_classes, device=self.device)
 
     def __load_model_weights(self, weight_path, resume):
         if resume:
-            # last_weight = os.path.join(os.path.split(weight_path)[0], "last.pt")
             last_weight = self.weight_path / "last.pt"
             chkpt = torch.load(last_weight, map_location=self.device)
             self.model.load_state_dict(chkpt["model"])
@@ -128,8 +123,6 @@ class Trainer(object):
     def __save_model_weights(self, epoch, mAP):
         if mAP > self.best_mAP:
             self.best_mAP = mAP
-        # best_weight = os.path.join(os.path.split(self.weight_path)[0], "best.pt")
-        # last_weight = os.path.join(os.path.split(self.weight_path)[0], "last.pt")
         best_weight = self.weight_path / "best.pt"
         last_weight = self.weight_path / "last.pt"
         chkpt = {
@@ -143,7 +136,7 @@ class Trainer(object):
         if self.best_mAP == mAP:
             torch.save(chkpt["model"], best_weight)
 
-        if epoch > 0 and epoch % 10 == 0:
+        if epoch > 0 and epoch % opt.checkpoint_save_freq == 0:
             torch.save(
                 chkpt,
                 os.path.join(
@@ -154,7 +147,8 @@ class Trainer(object):
 
     def train(self):
         print(self.model)
-        print("Train datasets number is : {}".format(len(self.train_dataset)))
+        print("The number of samples in the train dataset split: {}".format(len(self.train_dataset)))
+
         for epoch in range(self.start_epoch, self.epochs):
             self.model.train()
 
@@ -163,8 +157,8 @@ class Trainer(object):
                 self.scheduler.step()
                 imgs = imgs.to(self.device)
 
-                # p, p_d = self.model(imgs)
                 p, p_d = self.model(imgs)
+                
                 loss, loss_giou, loss_conf, loss_cls = self.criterion(
                     p, p_d, targets, labels_length, imgs.shape[-1]
                 )
@@ -178,7 +172,7 @@ class Trainer(object):
 
                 print(f"\repoch {epoch}/{self.epochs} - Iteration: {i}/{len(self.train_dataloader)}, loss: giou {mloss[0]:0.4f}    conf {mloss[1]:0.4f}    cls {mloss[2]:0.4f}    loss {mloss[3]:0.4f}", end="")
 
-                # multi-sclae training (320-608 pixels)
+                # multi-scale training (320-608 pixel resolution)
                 if self.multi_scale_train:
                     self.train_dataset._img_size = random.choice(range(10, 20)) * 32
 
@@ -213,14 +207,14 @@ if __name__ == "__main__":
         dest="batch_size",
         type=int,
         default=10,
-        help="The number of sample in one batch during training or inference.",
+        help="The number of samples in one batch during training or inference.",
     )
     parser.add_argument(
         "--eval-freq",
         dest="eval_freq",
         type=int,
         default=10,
-        help="The number of sample in one batch during training or inference.",
+        help="Evaluation run frequency (in training epochs).",
     )
     parser.add_argument(
         "--weight_path",
@@ -229,10 +223,16 @@ if __name__ == "__main__":
         help="where weights should be stored",
     )
     parser.add_argument(
-        "--resume", action="store_false", default=False, help="resume training flag"
+        "--checkpoint_save_freq",
+        type=int,
+        default=10,
+        help="Checkpoint dump frequency in training epochs",
     )
     parser.add_argument(
-        "--pretrained", default=True, help="Train Model from scratch if False"
+        "--resume", action="store_true", default=False, help="Resume training flag"
+    )
+    parser.add_argument(
+        "--pretrained", default=True, help="Train the model from scratch if False"
     )
     parser.add_argument("--gpu_id", type=int, default=0, help="gpu id")
     parser.add_argument(
@@ -240,14 +240,14 @@ if __name__ == "__main__":
         dest="n_cpu",
         type=int,
         default=4,
-        help="The number of cpu thread to use during batch generation.",
+        help="The number of cpu threads to use during batch generation.",
     )
     parser.add_argument(
         "--dataset",
         dest="dataset_type",
         type=str,
         default="voc",
-        help="The type of the dataset used. Currently support 'coco', 'voc', and 'lisa'",
+        help="The type of the dataset used. Currently support 'coco', 'voc', 'lisa' and 'wider_face",
     )
     parser.add_argument(
         "--net",
