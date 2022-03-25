@@ -162,8 +162,9 @@ def voc_eval(
     tp = np.zeros(nd)
     fp = np.zeros(nd)
     n_bins = 10
-    tp_bins = np.zeros(nd, n_bins)
-    fp_bins = np.zeros(nd, n_bins)
+    tp_bins = np.zeros((nd, n_bins + 1))
+    fp_bins = np.zeros((nd, n_bins + 1))
+    img_size = 448
     for d in range(nd):
         R = class_recs[image_ids[d]]
         bb = BB[d, :].astype(float)
@@ -191,7 +192,7 @@ def voc_eval(
             overlaps = inters / uni
             ovmax = np.max(overlaps)
             jmax = np.argmax(overlaps)
-        bin_index = int(inters[jmax] * 100)
+        bin_index = int(inters[jmax] / (img_size*img_size) * n_bins)
         if ovmax > ovthresh:
             if not R["difficult"][jmax]:
                 if not R["det"][jmax]:
@@ -200,7 +201,7 @@ def voc_eval(
                     tp_bins[d][bin_index] = 1.0
                 else:
                     fp[d] = 1.0
-                    fp_[d][bin_index] = 1.0
+                    fp_bins[d][bin_index] = 1.0
 
         else:
             fp[d] = 1.0
@@ -214,5 +215,13 @@ def voc_eval(
     # ground truth
     prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
     ap = voc_ap(rec, prec, use_07_metric)
+    print(rec, prec, ap)
+    for b in range(n_bins):
+        fp = np.cumsum(fp_bins[:, b])
+        tp = np.cumsum(tp_bins[:, b])
+        rec = tp / tp[-1]
+        prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
+        ap = voc_ap(rec, prec, use_07_metric)
+        print(b, rec, prec, ap)
 
     return rec, prec, ap
