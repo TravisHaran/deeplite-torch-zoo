@@ -161,6 +161,9 @@ def voc_eval(
     nd = len(image_ids)
     tp = np.zeros(nd)
     fp = np.zeros(nd)
+    n_bins = 10
+    tp_bins = np.zeros(nd, n_bins)
+    fp_bins = np.zeros(nd, n_bins)
     for d in range(nd):
         R = class_recs[image_ids[d]]
         bb = BB[d, :].astype(float)
@@ -188,17 +191,21 @@ def voc_eval(
             overlaps = inters / uni
             ovmax = np.max(overlaps)
             jmax = np.argmax(overlaps)
-
+        bin_index = int(inters[jmax] * 100)
         if ovmax > ovthresh:
             if not R["difficult"][jmax]:
                 if not R["det"][jmax]:
                     tp[d] = 1.0
                     R["det"][jmax] = 1
+                    tp_bins[d][bin_index] = 1.0
                 else:
                     fp[d] = 1.0
+                    fp_[d][bin_index] = 1.0
+
         else:
             fp[d] = 1.0
-
+            fp_bins[d][bin_index] = 1.0
+    import pdb; pdb.set_trace()
     # compute precision recall
     fp = np.cumsum(fp)
     tp = np.cumsum(tp)
