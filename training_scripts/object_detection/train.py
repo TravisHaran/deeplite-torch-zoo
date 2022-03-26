@@ -277,6 +277,7 @@ def warmup_training(train_dataloder, epoch, iter_number, optimizer=None, schedul
             if 'momentum' in x:
                 x['momentum'] = np.interp(iter_number, xi, [hyp_config.TRAIN['warmup_momentum'],
                     hyp_config.TRAIN['momentum']])
+
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--img-dir", dest="img_dir", type=Path, default="/neutrino/datasets/VOCdevkit", help="The path to the folder containing images to be detected or trained.")
